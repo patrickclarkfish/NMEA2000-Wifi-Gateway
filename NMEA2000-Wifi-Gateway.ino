@@ -40,6 +40,7 @@ const uint8_t n2kSourceId = 36;
 #include <NMEA2000_CAN.h>
 #include <N2kMessages.h>
 #include <N2kMessagesEnumToStr.h>
+#include <Seasmart.h>
 
 void HandleN2kMsg(const tN2kMsg &N2kMsg);
 
@@ -58,8 +59,8 @@ void setup() {
   Serial.println();
   Serial.println("NMEA2000-Wifi-Gateway Copyright (C) 2020 Patrick Clark");
   Serial.println("This program comes with ABSOLUTELY NO WARRANTY.");
-  Serial.println("This is free software, and you are welcome to redistribute it under certain conditions.")
-  Serial.println("See GNU GPL-3.0 at https://www.gnu.org/licenses/ or the LICENSE file included with this software for details.")
+  Serial.println("This is free software, and you are welcome to redistribute it under certain conditions.");
+  Serial.println("See GNU GPL-3.0 at https://www.gnu.org/licenses/ or the LICENSE file included with this software for details.");
   Serial.println();
   Serial.print( F("Heap: ") ); Serial.println(ESP.getFreeHeap());
   Serial.print( F("Boot Vers: ") ); Serial.println(esp_get_idf_version());
@@ -128,65 +129,24 @@ void setup() {
 
 //*****************************************************************************
 
-uint8_t chk8xor(char * byteArray, int length) 
-{
-  uint8_t checksum = 0x00;
-
-  for(uint8_t i = 0; i < length; i++)
-    checksum ^= byteArray[i];
-
-  return checksum;
-}
-
-
 //NMEA 2000 message handler
 void HandleN2kMsg(const tN2kMsg &N2kMsg) 
 {
   // SeaSmart.NET protocol N2K output
   // https://digitalmarinegauges.com/content/SeaSmart/SeaSmart_HTTP_Protocol_RevH.pdf
-  char strBuf[120];
+  char strBuf[500];
 
-  // PGN
-  memset(strBuf, 0, sizeof(strBuf));
-  sprintf(strBuf, "%06X,", N2kMsg.PGN);
-  String dataString = "PCDIN," + String(strBuf);
+  size_t valid = N2kToSeasmart(N2kMsg, millis(), strBuf, sizeof(strBuf));
 
-  // Timestamp
-  memset(strBuf, 0, sizeof(strBuf));
-  sprintf(strBuf, "%08X,", N2kMsg.MsgTime);
-  dataString += String(strBuf);
-
-  // Source ID
-  memset(strBuf, 0, sizeof(strBuf));
-  sprintf(strBuf, "%02X,", N2kMsg.Source);
-  dataString += String(strBuf);
-
-  // Data
-  uint8_t i;
-  for(i = 0; i < N2kMsg.DataLen; i++)
+  if(valid)
   {
-    memset(strBuf, 0, sizeof(strBuf));
-    sprintf(strBuf, "%02X", N2kMsg.Data[i]);
-    dataString += String(strBuf);
+    for(int i = 0; i < MAX_SRV_CLIENTS; i++)
+    {
+      if(serverClients[i] && serverClients[i].connected())
+        serverClients[i].println(String(strBuf));
+    }
   }
-
-  // Checksum
-  memset(strBuf, 0, sizeof(strBuf));
-  dataString.toCharArray(strBuf, 120);
-  uint8_t checksum = chk8xor(strBuf, dataString.length());
-
-  memset(strBuf, 0, sizeof(strBuf));
-  sprintf(strBuf, "%02X", checksum);
-
-  // Build the final string. Start marker, guts, end marker, checksum
-  dataString = "$" + dataString + "*" + String(strBuf);
-
-  //Serial.println(dataString);
-  for(i = 0; i < MAX_SRV_CLIENTS; i++)
-  {
-    if(serverClients[i] && serverClients[i].connected())
-      serverClients[i].println(dataString);
-  }
+  else Serial.println("Invalid N2k packet");
 }
 
 
@@ -195,7 +155,7 @@ void HandleN2kMsg(const tN2kMsg &N2kMsg)
 void loop() {
   NMEA2000.ParseMessages();
   ArduinoOTA.handle();
-
+  
   uint8_t i;
   if (true) //wifiMulti.run() == WL_CONNECTED) 
   {
